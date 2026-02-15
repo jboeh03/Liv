@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Asset Pipeline</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>Asset Pipeline</h1>
+    <p class="subtitle">Marketing asset processing tool</p>
+  </header>
+
+  <!-- Step indicator -->
+  <nav class="steps">
+    <div class="step active" data-step="1">
+      <span class="step-number">1</span>
+      <span class="step-label">Upload PDF</span>
+    </div>
+    <div class="step-connector"></div>
+    <div class="step" data-step="2">
+      <span class="step-number">2</span>
+      <span class="step-label">Load Assets</span>
+    </div>
+    <div class="step-connector"></div>
+    <div class="step" data-step="3">
+      <span class="step-number">3</span>
+      <span class="step-label">Review</span>
+    </div>
+    <div class="step-connector"></div>
+    <div class="step" data-step="4">
+      <span class="step-number">4</span>
+      <span class="step-label">Process</span>
+    </div>
+  </nav>
+
+  <main>
+    <!-- ============================================================ -->
+    <!-- STEP 1: Upload PDF                                           -->
+    <!-- ============================================================ -->
+    <section id="step-1" class="panel visible">
+      <h2>Step 1 — Upload Creative Brief (PDF)</h2>
+      <p>Drag &amp; drop your PDF creative brief below, or click to select a file.</p>
+
+      <div id="drop-zone" class="drop-zone">
+        <div class="drop-zone-inner">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="12" y1="18" x2="12" y2="12"/>
+            <polyline points="9 15 12 12 15 15"/>
+          </svg>
+          <span>Drop PDF here or <label for="pdf-input" class="link">browse</label></span>
+        </div>
+        <input type="file" id="pdf-input" accept=".pdf" hidden>
+      </div>
+
+      <div id="pdf-status" class="status-message hidden"></div>
+
+      <!-- Parsed data preview table -->
+      <div id="parsed-preview" class="hidden">
+        <h3>Extracted Asset Data</h3>
+        <div class="table-wrapper">
+          <table id="parsed-table">
+            <thead><tr id="parsed-header"></tr></thead>
+            <tbody id="parsed-body"></tbody>
+          </table>
+        </div>
+        <button id="btn-next-step2" class="btn primary">Continue to Step 2</button>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- STEP 2: Load Asset Folder                                    -->
+    <!-- ============================================================ -->
+    <section id="step-2" class="panel hidden">
+      <h2>Step 2 — Load Asset Folder</h2>
+      <p>Enter the full path to the folder containing your asset files.</p>
+
+      <div class="input-row">
+        <input type="text" id="folder-path" placeholder="/path/to/assets/folder" autocomplete="off">
+        <button id="btn-load-folder" class="btn primary">Load Folder</button>
+      </div>
+
+      <div id="folder-status" class="status-message hidden"></div>
+
+      <div id="folder-files" class="hidden">
+        <h3>Files Found</h3>
+        <ul id="file-list"></ul>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- STEP 3: Review Matches                                       -->
+    <!-- ============================================================ -->
+    <section id="step-3" class="panel hidden">
+      <h2>Step 3 — Review &amp; Correct Matches</h2>
+      <p>Review the matched files below. Use the dropdown to correct any mismatches.</p>
+
+      <div class="table-wrapper">
+        <table id="review-table">
+          <thead><tr id="review-header"></tr></thead>
+          <tbody id="review-body"></tbody>
+        </table>
+      </div>
+
+      <div class="actions-row">
+        <button id="btn-back-step2" class="btn secondary">Back</button>
+        <button id="btn-next-step4" class="btn primary">Confirm &amp; Continue</button>
+      </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- STEP 4: Process                                              -->
+    <!-- ============================================================ -->
+    <section id="step-4" class="panel hidden">
+      <h2>Step 4 — Process Assets</h2>
+
+      <div class="toggle-row">
+        <label class="toggle">
+          <input type="checkbox" id="sharepoint-toggle">
+          <span class="toggle-slider"></span>
+        </label>
+        <span>Upload to SharePoint after processing</span>
+      </div>
+
+      <button id="btn-process" class="btn primary large">Process Assets</button>
+
+      <div id="process-log" class="log-panel hidden">
+        <h3>Processing Log</h3>
+        <pre id="log-output"></pre>
+      </div>
+
+      <div id="process-summary" class="hidden">
+        <h3>Summary</h3>
+        <div id="summary-content"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p>Asset Pipeline &mdash; runs locally on your machine. Your data never leaves this computer (except optional SharePoint upload).</p>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

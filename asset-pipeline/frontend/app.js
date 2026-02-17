@@ -1,54 +1,41 @@
 /**
  * app.js — Frontend logic for the Asset Pipeline single-page app.
  *
- * Flow: Step 1 (Upload PDF) → Step 2 (Load Assets) → Step 3 (Review) → Step 4 (Process)
+ * Flow: Step 1 (Upload PDF) → Step 2 (Review & Edit tabs) → Step 3 (Download)
  */
 
 "use strict";
 
 // ── State ────────────────────────────────────────────────────────────
-let config = {};          // populated from /api/config
-let parsedRows = [];      // rows returned from PDF parsing
-let matchedRows = [];     // rows with file-match data
-let availableFiles = [];  // files found in asset folder
+let tabTemplates = {};   // from /api/config
+let tabsData = {};       // { "TabName": { headers: [...], rows: [...] }, ... }
+let activeTab = "";      // currently selected tab name
 
 // ── DOM refs ─────────────────────────────────────────────────────────
 const $  = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
 // Steps
-const stepSections = { 1: $("#step-1"), 2: $("#step-2"), 3: $("#step-3"), 4: $("#step-4") };
+const stepSections = { 1: $("#step-1"), 2: $("#step-2"), 3: $("#step-3") };
 const stepIndicators = $$(".step");
 
 // Step 1
 const dropZone   = $("#drop-zone");
 const pdfInput   = $("#pdf-input");
 const pdfStatus  = $("#pdf-status");
-const parsedPreview = $("#parsed-preview");
-const parsedHeader  = $("#parsed-header");
-const parsedBody    = $("#parsed-body");
-const btnNextStep2  = $("#btn-next-step2");
 
 // Step 2
-const folderPath   = $("#folder-path");
-const btnLoadFolder = $("#btn-load-folder");
-const folderStatus  = $("#folder-status");
-const folderFiles   = $("#folder-files");
-const fileList      = $("#file-list");
+const tabBar     = $("#tab-bar");
+const tabContent  = $("#tab-content");
+const btnAddRow   = $("#btn-add-row");
+const btnBackStep1 = $("#btn-back-step1");
+const btnNextStep3 = $("#btn-next-step3");
 
 // Step 3
-const reviewHeader = $("#review-header");
-const reviewBody   = $("#review-body");
-const btnBackStep2 = $("#btn-back-step2");
-const btnNextStep4 = $("#btn-next-step4");
-
-// Step 4
-const sharepointToggle = $("#sharepoint-toggle");
-const btnProcess    = $("#btn-process");
-const processLog    = $("#process-log");
-const logOutput     = $("#log-output");
-const processSummary = $("#process-summary");
-const summaryContent = $("#summary-content");
+const btnDownloadXlsx = $("#btn-download-xlsx");
+const btnDownloadCsv  = $("#btn-download-csv");
+const downloadStatus  = $("#download-status");
+const btnBackStep2    = $("#btn-back-step2");
 
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -64,40 +51,15 @@ function hideStatus(el) {
 }
 
 function goToStep(n) {
-  // Hide all
   Object.values(stepSections).forEach((s) => s.classList.add("hidden"));
   stepSections[n].classList.remove("hidden");
 
-  // Update indicators
   stepIndicators.forEach((ind) => {
     const s = parseInt(ind.dataset.step, 10);
     ind.classList.remove("active", "completed");
     if (s < n) ind.classList.add("completed");
     if (s === n) ind.classList.add("active");
   });
-}
-
-async function apiPost(url, body, isFormData = false) {
-  const opts = { method: "POST" };
-  if (isFormData) {
-    opts.body = body;
-  } else {
-    opts.headers = { "Content-Type": "application/json" };
-    opts.body = JSON.stringify(body);
-  }
-  const resp = await fetch(url, opts);
-  const data = await resp.json();
-  if (!resp.ok) {
-    throw new Error(data.detail || `Request failed (${resp.status})`);
-  }
-  return data;
-}
-
-function confidenceBadge(score) {
-  if (score >= 80) return `<span class="badge high">${score}%</span>`;
-  if (score >= 60) return `<span class="badge medium">${score}%</span>`;
-  if (score > 0)   return `<span class="badge low">${score}%</span>`;
-  return `<span class="badge none">No match</span>`;
 }
 
 function escapeHtml(str) {
@@ -112,7 +74,8 @@ function escapeHtml(str) {
 async function init() {
   try {
     const resp = await fetch("/api/config");
-    config = await resp.json();
+    const data = await resp.json();
+    tabTemplates = data.tab_templates || {};
   } catch {
     console.error("Failed to load config");
   }
@@ -125,7 +88,6 @@ init();
 // STEP 1 — PDF Upload
 // ══════════════════════════════════════════════════════════════════════
 
-// Drag & drop
 dropZone.addEventListener("dragover", (e) => {
   e.preventDefault();
   dropZone.classList.add("dragover");
@@ -155,195 +117,245 @@ async function uploadPdf(file) {
   }
 
   showStatus(pdfStatus, `Uploading and parsing "${file.name}"... This may take a moment.`, "loading");
-  parsedPreview.classList.add("hidden");
 
   const form = new FormData();
   form.append("file", file);
 
   try {
-    const data = await apiPost("/api/parse-pdf", form, true);
-    parsedRows = data.rows;
+    const resp = await fetch("/api/parse-pdf", { method: "POST", body: form });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || `Request failed (${resp.status})`);
 
-    showStatus(pdfStatus, `Extracted ${data.count} asset(s) from "${file.name}".`, "success");
-    renderParsedTable();
-    parsedPreview.classList.remove("hidden");
+    tabsData = data.tabs || {};
+
+    const tabCount = Object.keys(tabsData).length;
+    const rowCount = Object.values(tabsData).reduce((sum, t) => sum + (t.rows || []).length, 0);
+    showStatus(pdfStatus, `Extracted ${rowCount} row(s) across ${tabCount} tab(s) from "${file.name}".`, "success");
+
+    // Auto-advance to edit step
+    renderTabs();
+    goToStep(2);
   } catch (err) {
     showStatus(pdfStatus, `Error: ${err.message}`, "error");
   }
 }
 
-function renderParsedTable() {
-  const cols = config.columns || Object.keys(parsedRows[0] || {});
-
-  parsedHeader.innerHTML = cols.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
-  parsedBody.innerHTML = parsedRows
-    .map(
-      (row) =>
-        `<tr>${cols.map((c) => `<td>${escapeHtml(String(row[c] || ""))}</td>`).join("")}</tr>`
-    )
-    .join("");
-}
-
-btnNextStep2.addEventListener("click", () => goToStep(2));
-
 
 // ══════════════════════════════════════════════════════════════════════
-// STEP 2 — Load Asset Folder
+// STEP 2 — Review & Edit (Tabbed Interface)
 // ══════════════════════════════════════════════════════════════════════
 
-btnLoadFolder.addEventListener("click", loadFolder);
-folderPath.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") loadFolder();
-});
-
-async function loadFolder() {
-  const path = folderPath.value.trim();
-  if (!path) {
-    showStatus(folderStatus, "Please enter a folder path.", "error");
+function renderTabs() {
+  const tabNames = Object.keys(tabsData);
+  if (tabNames.length === 0) {
+    tabBar.innerHTML = "";
+    tabContent.innerHTML = '<p class="empty-state">No data extracted. Go back and try another PDF.</p>';
     return;
   }
 
-  showStatus(folderStatus, "Scanning folder and matching files...", "loading");
-  folderFiles.classList.add("hidden");
-
-  try {
-    const data = await apiPost("/api/load-folder", { folder_path: path });
-    matchedRows = data.rows;
-    availableFiles = data.files;
-
-    // Show file list
-    fileList.innerHTML = data.files
-      .map((f) => `<li>${escapeHtml(f.name)}</li>`)
-      .join("");
-    folderFiles.classList.remove("hidden");
-
-    showStatus(
-      folderStatus,
-      `Found ${data.files.length} file(s). Matched against ${data.count} row(s).`,
-      "success"
-    );
-
-    // Auto-advance to review
-    renderReviewTable();
-    goToStep(3);
-  } catch (err) {
-    showStatus(folderStatus, `Error: ${err.message}`, "error");
+  // Set active tab
+  if (!activeTab || !tabsData[activeTab]) {
+    activeTab = tabNames[0];
   }
-}
 
-
-// ══════════════════════════════════════════════════════════════════════
-// STEP 3 — Review Matches
-// ══════════════════════════════════════════════════════════════════════
-
-function renderReviewTable() {
-  const cols = config.columns || [];
-
-  // Header: data columns + Matched File + Confidence
-  let headerHtml = cols.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
-  headerHtml += `<th>Matched File</th><th>Confidence</th>`;
-  reviewHeader.innerHTML = headerHtml;
-
-  // Build file options HTML (for dropdown)
-  const fileOptions = availableFiles
-    .map((f) => `<option value="${escapeHtml(f.name)}" data-path="${escapeHtml(f.path)}">${escapeHtml(f.name)}</option>`)
-    .join("");
-
-  reviewBody.innerHTML = matchedRows
-    .map((row, i) => {
-      let rowHtml = cols.map((c) => `<td>${escapeHtml(String(row[c] || ""))}</td>`).join("");
-
-      // Dropdown for file matching
-      const selected = row._matched_file || "";
-      rowHtml += `<td>
-        <select class="review-select" data-row="${i}" onchange="onMatchChange(this)">
-          <option value="">-- None --</option>
-          ${fileOptions}
-        </select>
-      </td>`;
-      rowHtml += `<td>${confidenceBadge(row._match_score)}</td>`;
-
-      return `<tr>${rowHtml}</tr>`;
+  // Render tab bar
+  tabBar.innerHTML = tabNames
+    .map((name) => {
+      const cls = name === activeTab ? "tab active" : "tab";
+      const rowCount = (tabsData[name].rows || []).length;
+      return `<button class="${cls}" data-tab="${escapeHtml(name)}">${escapeHtml(name)} <span class="tab-count">(${rowCount})</span></button>`;
     })
     .join("");
 
-  // Pre-select current matches in dropdowns
-  reviewBody.querySelectorAll("select.review-select").forEach((sel) => {
-    const idx = parseInt(sel.dataset.row, 10);
-    const matched = matchedRows[idx]._matched_file || "";
-    if (matched) sel.value = matched;
+  // Tab click handlers
+  tabBar.querySelectorAll(".tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      saveCurrentEdits();
+      activeTab = btn.dataset.tab;
+      renderTabs();
+    });
+  });
+
+  // Render active tab's table
+  renderTabTable();
+}
+
+function renderTabTable() {
+  const tab = tabsData[activeTab];
+  if (!tab) {
+    tabContent.innerHTML = '<p class="empty-state">No data for this tab.</p>';
+    return;
+  }
+
+  const headers = tab.headers || [];
+  const rows = tab.rows || [];
+
+  let html = '<div class="table-wrapper"><table>';
+
+  // Header row
+  html += "<thead><tr>";
+  html += '<th class="row-actions-header">#</th>';
+  headers.forEach((h) => {
+    html += `<th>${escapeHtml(h)}</th>`;
+  });
+  html += "</tr></thead>";
+
+  // Data rows
+  html += "<tbody>";
+  rows.forEach((row, rowIdx) => {
+    html += `<tr data-row="${rowIdx}">`;
+    html += `<td class="row-num">
+      <span class="row-index">${rowIdx + 1}</span>
+      <button class="btn-delete-row" data-row="${rowIdx}" title="Delete row">&times;</button>
+    </td>`;
+    headers.forEach((h) => {
+      const val = row[h] || "";
+      html += `<td class="editable" data-col="${escapeHtml(h)}" data-row="${rowIdx}">${escapeHtml(String(val))}</td>`;
+    });
+    html += "</tr>";
+  });
+  html += "</tbody></table></div>";
+
+  tabContent.innerHTML = html;
+
+  // Make cells editable on click
+  tabContent.querySelectorAll("td.editable").forEach((td) => {
+    td.addEventListener("click", () => startEditing(td));
+  });
+
+  // Delete row buttons
+  tabContent.querySelectorAll(".btn-delete-row").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const rowIdx = parseInt(btn.dataset.row, 10);
+      tabsData[activeTab].rows.splice(rowIdx, 1);
+      renderTabs();
+    });
   });
 }
 
-// Global handler for match-change dropdowns
-window.onMatchChange = async function (sel) {
-  const rowIdx = parseInt(sel.dataset.row, 10);
-  const fileName = sel.value;
-  const option = sel.selectedOptions[0];
-  const filePath = option ? option.dataset.path || "" : "";
+function startEditing(td) {
+  // Don't double-edit
+  if (td.querySelector("textarea")) return;
 
-  // Update local state
-  matchedRows[rowIdx]._matched_file = fileName;
-  matchedRows[rowIdx]._matched_path = filePath;
-  matchedRows[rowIdx]._match_score = fileName ? 100 : 0;
+  const currentValue = tabsData[activeTab].rows[td.dataset.row][td.dataset.col] || "";
 
-  // Persist to backend
-  try {
-    await apiPost("/api/update-match", {
-      row_index: rowIdx,
-      matched_file: fileName,
-      matched_path: filePath,
-    });
-  } catch (err) {
-    console.error("Failed to update match:", err);
-  }
+  const textarea = document.createElement("textarea");
+  textarea.className = "cell-editor";
+  textarea.value = currentValue;
+  td.textContent = "";
+  td.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
 
-  // Re-render confidence badge
-  const badgeCell = sel.parentElement.nextElementSibling;
-  if (badgeCell) {
-    badgeCell.innerHTML = confidenceBadge(matchedRows[rowIdx]._match_score);
-  }
-};
+  // Auto-resize
+  autoResize(textarea);
+  textarea.addEventListener("input", () => autoResize(textarea));
 
-btnBackStep2.addEventListener("click", () => goToStep(2));
-btnNextStep4.addEventListener("click", () => goToStep(4));
+  // Save on blur or Enter (Shift+Enter for newline)
+  const save = () => {
+    const newValue = textarea.value;
+    tabsData[activeTab].rows[td.dataset.row][td.dataset.col] = newValue;
+    td.textContent = newValue;
+    // Re-attach click handler
+    td.addEventListener("click", () => startEditing(td));
+  };
+
+  textarea.addEventListener("blur", save);
+  textarea.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      textarea.blur();
+    }
+    if (e.key === "Escape") {
+      textarea.value = currentValue;
+      textarea.blur();
+    }
+  });
+}
+
+function autoResize(textarea) {
+  textarea.style.height = "auto";
+  textarea.style.height = textarea.scrollHeight + "px";
+}
+
+function saveCurrentEdits() {
+  // Force-save any open textarea editors
+  tabContent.querySelectorAll("textarea.cell-editor").forEach((ta) => {
+    ta.blur();
+  });
+}
+
+// Add row
+btnAddRow.addEventListener("click", () => {
+  if (!activeTab || !tabsData[activeTab]) return;
+  saveCurrentEdits();
+  const headers = tabsData[activeTab].headers || [];
+  const emptyRow = {};
+  headers.forEach((h) => (emptyRow[h] = ""));
+  tabsData[activeTab].rows.push(emptyRow);
+  renderTabs();
+
+  // Scroll to bottom of table
+  const wrapper = tabContent.querySelector(".table-wrapper");
+  if (wrapper) wrapper.scrollTop = wrapper.scrollHeight;
+});
+
+btnBackStep1.addEventListener("click", () => goToStep(1));
+btnNextStep3.addEventListener("click", () => {
+  saveCurrentEdits();
+  goToStep(3);
+});
 
 
 // ══════════════════════════════════════════════════════════════════════
-// STEP 4 — Process
+// STEP 3 — Download
 // ══════════════════════════════════════════════════════════════════════
 
-btnProcess.addEventListener("click", processAssets);
-
-async function processAssets() {
-  btnProcess.disabled = true;
-  processLog.classList.remove("hidden");
-  processSummary.classList.add("hidden");
-  logOutput.textContent = "Processing...\n";
+async function downloadFile(url, defaultFilename) {
+  hideStatus(downloadStatus);
 
   try {
-    const data = await apiPost("/api/process", {
-      rows: matchedRows,
-      upload_to_sharepoint: sharepointToggle.checked,
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tabs: tabsData }),
     });
 
-    // Display log
-    logOutput.textContent = data.log.join("\n");
-
-    // Display summary
-    let html = `<strong>${data.files_processed}</strong> file(s) processed.<br>`;
-    html += `Output folder: <code>${escapeHtml(data.output_folder)}</code><br>`;
-    html += `Tracking sheet: <code>${escapeHtml(data.tracking_sheet)}</code>`;
-
-    if (data.sharepoint_urls && data.sharepoint_urls.length > 0) {
-      html += `<br><strong>${data.sharepoint_urls.length}</strong> file(s) uploaded to SharePoint.`;
+    if (!resp.ok) {
+      const err = await resp.json();
+      throw new Error(err.detail || `Download failed (${resp.status})`);
     }
 
-    summaryContent.innerHTML = html;
-    processSummary.classList.remove("hidden");
+    // Get filename from Content-Disposition header or use default
+    const disposition = resp.headers.get("Content-Disposition");
+    let filename = defaultFilename;
+    if (disposition) {
+      const match = disposition.match(/filename[^;=\n]*=(['""]?)([^'"";\n]*)\1/);
+      if (match) filename = match[2];
+    }
+
+    const blob = await resp.blob();
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+
+    showStatus(downloadStatus, `Downloaded "${filename}" successfully.`, "success");
   } catch (err) {
-    logOutput.textContent += `\nError: ${err.message}`;
-  } finally {
-    btnProcess.disabled = false;
+    showStatus(downloadStatus, `Error: ${err.message}`, "error");
   }
 }
+
+btnDownloadXlsx.addEventListener("click", () => {
+  downloadFile("/api/download-xlsx", "tracking_sheet.xlsx");
+});
+
+btnDownloadCsv.addEventListener("click", () => {
+  downloadFile("/api/download-csv", "tracking_sheets.zip");
+});
+
+btnBackStep2.addEventListener("click", () => goToStep(2));

@@ -1,17 +1,17 @@
 """
 pdf_parser.py — Extract text from a PDF creative brief and use Claude
-to return structured asset data as a JSON array.
+to return structured, multi-tab asset data as JSON.
 
 HOW THE CLAUDE PROMPT WORKS
 ---------------------------
 1. pdfplumber extracts every page of the uploaded PDF as plain text.
 2. The concatenated text is sent to Claude along with a system prompt
-   that lists the exact column names from config.TRACKING_SHEET_COLUMNS.
-3. Claude returns a JSON array where each element is one asset row.
+   that describes all available tab templates from config.TAB_TEMPLATES.
+3. Claude decides which tabs are relevant to the brief, then returns
+   a JSON object keyed by tab name, each containing "headers" and "rows".
 
 To adjust what Claude extracts, edit the SYSTEM_PROMPT and USER_PROMPT
-templates below.  The {columns_json} placeholder is automatically
-replaced with the current column list from config.py.
+templates below.
 """
 
 from __future__ import annotations
@@ -24,35 +24,61 @@ from typing import Any
 import pdfplumber
 from anthropic import Anthropic
 
-from config import ANTHROPIC_API_KEY, CLAUDE_MODEL, TRACKING_SHEET_COLUMNS
+from config import ANTHROPIC_API_KEY, CLAUDE_MODEL, TAB_TEMPLATES
 
 logger = logging.getLogger(__name__)
 
 # ---- Claude prompts (edit these to change extraction behaviour) ----------
 
-# System prompt — tells Claude its role and the exact output format.
 SYSTEM_PROMPT = """\
 You are a marketing data extraction assistant.  You will receive the raw
-text of a creative brief PDF.  Your job is to extract every individual
-asset/ad described in the brief and return them as a JSON array.
+text of a creative brief PDF.  Your job is to:
 
-Each object in the array MUST use the following keys (exactly as shown):
-{columns_json}
+1. Determine which of the available spreadsheet tabs are relevant to this
+   brief based on its content (e.g., if the brief describes paid social
+   assets, include the "Paid Social Trafficking" tab; if it has
+   programmatic display, include "Prog", etc.).
+
+2. For each relevant tab, extract every individual asset/ad described in
+   the brief and populate the rows using that tab's column headers.
+
+AVAILABLE TAB TEMPLATES (tab name → column headers):
+{templates_json}
+
+OUTPUT FORMAT — return ONLY valid JSON (no markdown fences, no commentary)
+with this structure:
+
+{{
+  "tabs": {{
+    "<TabName>": {{
+      "headers": ["col1", "col2", ...],
+      "rows": [
+        {{"col1": "value", "col2": "value", ...}},
+        ...
+      ]
+    }},
+    ...
+  }}
+}}
 
 Rules:
-- Return ONLY valid JSON — no markdown fences, no commentary.
+- Only include tabs that are relevant to this brief.
+- Use the exact header names from the template for each tab.
 - If a field cannot be determined from the text, use an empty string "".
-- Each object represents one distinct asset/ad placement.
+- Each row represents one distinct asset/ad placement.
 - Dates should be in YYYY-MM-DD format when possible.
-- "Asset Name" should be a short, descriptive label for the asset.
-- "File Name" should be your best guess at the original file name
-  referenced in the brief (or "" if not mentioned).
+- Extract ALL copy text, headlines, descriptions, CTAs, landing pages,
+  disclaimers, etc. exactly as written in the brief — do not summarise.
+- For the "Paid Social Trafficking" tab, populate character count fields
+  by counting the characters in the corresponding text field.
+- If the brief contains asset file names, include them in the appropriate
+  file name column.
+- Be thorough — capture every asset variation and placement mentioned.
 """
 
-# User prompt — wraps the extracted PDF text.
 USER_PROMPT = """\
 Extract all assets from the following creative brief text.
-Return a JSON array of objects.
+Return a JSON object with only the relevant tabs populated.
 
 --- BEGIN BRIEF TEXT ---
 {pdf_text}
@@ -71,20 +97,27 @@ def extract_text_from_pdf(file_bytes: bytes) -> str:
     return "\n\n".join(pages)
 
 
-def parse_with_claude(pdf_text: str) -> list[dict[str, Any]]:
+def parse_with_claude(pdf_text: str) -> dict[str, Any]:
     """
-    Send extracted PDF text to Claude and get back structured asset rows.
+    Send extracted PDF text to Claude and get back multi-tab structured data.
 
-    Returns a list of dicts whose keys match TRACKING_SHEET_COLUMNS.
+    Returns a dict like:
+    {
+        "tabs": {
+            "Prog": {"headers": [...], "rows": [...]},
+            "Paid Social Trafficking": {"headers": [...], "rows": [...]},
+            ...
+        }
+    }
     """
     client = Anthropic(api_key=ANTHROPIC_API_KEY)
 
-    columns_json = json.dumps(TRACKING_SHEET_COLUMNS, indent=2)
+    templates_json = json.dumps(TAB_TEMPLATES, indent=2)
 
     message = client.messages.create(
         model=CLAUDE_MODEL,
-        max_tokens=4096,
-        system=SYSTEM_PROMPT.format(columns_json=columns_json),
+        max_tokens=8192,
+        system=SYSTEM_PROMPT.format(templates_json=templates_json),
         messages=[
             {
                 "role": "user",
@@ -102,23 +135,33 @@ def parse_with_claude(pdf_text: str) -> list[dict[str, Any]]:
         raw = raw.rsplit("```", 1)[0]
 
     try:
-        rows: list[dict[str, Any]] = json.loads(raw)
+        result: dict[str, Any] = json.loads(raw)
     except json.JSONDecodeError as exc:
         logger.error("Claude returned invalid JSON: %s", raw[:500])
         raise ValueError("Claude did not return valid JSON. Try again.") from exc
 
-    # Ensure every row has all expected columns (fill missing with "").
-    normalised: list[dict[str, Any]] = []
-    for row in rows:
-        normalised.append({col: row.get(col, "") for col in TRACKING_SHEET_COLUMNS})
-    return normalised
+    # Normalise: ensure every tab has headers + rows, and every row has all
+    # header keys filled (at least with "").
+    tabs = result.get("tabs", result)  # handle both {tabs: {...}} and flat
+    normalised: dict[str, Any] = {}
+    for tab_name, tab_data in tabs.items():
+        headers = tab_data.get("headers", TAB_TEMPLATES.get(tab_name, []))
+        rows = tab_data.get("rows", [])
+
+        clean_rows = []
+        for row in rows:
+            clean_rows.append({h: row.get(h, "") for h in headers})
+
+        normalised[tab_name] = {"headers": headers, "rows": clean_rows}
+
+    return {"tabs": normalised}
 
 
-async def parse_pdf(file_bytes: bytes) -> list[dict[str, Any]]:
+async def parse_pdf(file_bytes: bytes) -> dict[str, Any]:
     """
     High-level entry point: extract text then parse with Claude.
 
-    Returns a list of dicts ready for the review table.
+    Returns multi-tab structured data ready for the review UI.
     """
     pdf_text = extract_text_from_pdf(file_bytes)
     if not pdf_text.strip():

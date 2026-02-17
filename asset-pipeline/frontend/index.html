@@ -21,17 +21,12 @@
     <div class="step-connector"></div>
     <div class="step" data-step="2">
       <span class="step-number">2</span>
-      <span class="step-label">Load Assets</span>
+      <span class="step-label">Review & Edit</span>
     </div>
     <div class="step-connector"></div>
     <div class="step" data-step="3">
       <span class="step-number">3</span>
-      <span class="step-label">Review</span>
-    </div>
-    <div class="step-connector"></div>
-    <div class="step" data-step="4">
-      <span class="step-number">4</span>
-      <span class="step-label">Process</span>
+      <span class="step-label">Download</span>
     </div>
   </nav>
 
@@ -41,7 +36,8 @@
     <!-- ============================================================ -->
     <section id="step-1" class="panel visible">
       <h2>Step 1 — Upload Creative Brief (PDF)</h2>
-      <p>Drag &amp; drop your PDF creative brief below, or click to select a file.</p>
+      <p>Drag & drop your PDF creative brief below, or click to select a file. Claude will analyse
+         the brief and determine which spreadsheet tabs and data to populate.</p>
 
       <div id="drop-zone" class="drop-zone">
         <div class="drop-zone-inner">
@@ -57,90 +53,51 @@
       </div>
 
       <div id="pdf-status" class="status-message hidden"></div>
-
-      <!-- Parsed data preview table -->
-      <div id="parsed-preview" class="hidden">
-        <h3>Extracted Asset Data</h3>
-        <div class="table-wrapper">
-          <table id="parsed-table">
-            <thead><tr id="parsed-header"></tr></thead>
-            <tbody id="parsed-body"></tbody>
-          </table>
-        </div>
-        <button id="btn-next-step2" class="btn primary">Continue to Step 2</button>
-      </div>
     </section>
 
     <!-- ============================================================ -->
-    <!-- STEP 2: Load Asset Folder                                    -->
+    <!-- STEP 2: Review & Edit (tabbed interface)                     -->
     <!-- ============================================================ -->
     <section id="step-2" class="panel hidden">
-      <h2>Step 2 — Load Asset Folder</h2>
-      <p>Enter the full path to the folder containing your asset files.</p>
+      <h2>Step 2 — Review & Edit Data</h2>
+      <p>Review the extracted data below. Click any cell to edit. Use the tabs to switch between sheets.
+         You can also add or remove rows.</p>
 
-      <div class="input-row">
-        <input type="text" id="folder-path" placeholder="/path/to/assets/folder" autocomplete="off">
-        <button id="btn-load-folder" class="btn primary">Load Folder</button>
-      </div>
+      <div id="tab-bar" class="tab-bar"></div>
 
-      <div id="folder-status" class="status-message hidden"></div>
-
-      <div id="folder-files" class="hidden">
-        <h3>Files Found</h3>
-        <ul id="file-list"></ul>
-      </div>
-    </section>
-
-    <!-- ============================================================ -->
-    <!-- STEP 3: Review Matches                                       -->
-    <!-- ============================================================ -->
-    <section id="step-3" class="panel hidden">
-      <h2>Step 3 — Review &amp; Correct Matches</h2>
-      <p>Review the matched files below. Use the dropdown to correct any mismatches.</p>
-
-      <div class="table-wrapper">
-        <table id="review-table">
-          <thead><tr id="review-header"></tr></thead>
-          <tbody id="review-body"></tbody>
-        </table>
+      <div id="tab-content" class="tab-content">
+        <!-- Dynamic table rendered here -->
       </div>
 
       <div class="actions-row">
-        <button id="btn-back-step2" class="btn secondary">Back</button>
-        <button id="btn-next-step4" class="btn primary">Confirm &amp; Continue</button>
+        <button id="btn-add-row" class="btn secondary">+ Add Row</button>
+        <button id="btn-back-step1" class="btn secondary">Back</button>
+        <button id="btn-next-step3" class="btn primary">Continue to Download</button>
       </div>
     </section>
 
     <!-- ============================================================ -->
-    <!-- STEP 4: Process                                              -->
+    <!-- STEP 3: Download                                             -->
     <!-- ============================================================ -->
-    <section id="step-4" class="panel hidden">
-      <h2>Step 4 — Process Assets</h2>
+    <section id="step-3" class="panel hidden">
+      <h2>Step 3 — Download</h2>
+      <p>Your data is ready. Choose a format to download.</p>
 
-      <div class="toggle-row">
-        <label class="toggle">
-          <input type="checkbox" id="sharepoint-toggle">
-          <span class="toggle-slider"></span>
-        </label>
-        <span>Upload to SharePoint after processing</span>
+      <div class="download-buttons">
+        <button id="btn-download-xlsx" class="btn primary large">Download XLSX</button>
+        <button id="btn-download-csv" class="btn secondary large">Download CSV (ZIP)</button>
       </div>
 
-      <button id="btn-process" class="btn primary large">Process Assets</button>
+      <div id="download-status" class="status-message hidden"></div>
 
-      <div id="process-log" class="log-panel hidden">
-        <h3>Processing Log</h3>
-        <pre id="log-output"></pre>
-      </div>
-
-      <div id="process-summary" class="hidden">
-        <h3>Summary</h3>
-        <div id="summary-content"></div>
+      <div class="actions-row" style="margin-top:1.5rem">
+        <button id="btn-back-step2" class="btn secondary">Back to Edit</button>
       </div>
     </section>
   </main>
 
   <footer>
-    <p>Asset Pipeline &mdash; runs locally on your machine. Your data never leaves this computer (except optional SharePoint upload).</p>
+    <p>Asset Pipeline &mdash; runs locally on your machine.</p>
   </footer>
 
   <script src="/static/app.js"></script>
